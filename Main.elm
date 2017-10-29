@@ -1,6 +1,5 @@
 module Main exposing (..)
 
--- import Time
 --import Debug exposing (log)
 
 import AnimationFrame
@@ -57,7 +56,7 @@ type alias Model =
 
 
 initModel : Flags -> Location -> Model
-initModel {dynamicWsPort, delay} location =
+initModel { dynamicWsPort, delay } location =
     { grid = { width = 0, height = 0, cellSize = 1 }
     , url =
         { host = location.hostname
@@ -174,11 +173,10 @@ update msg model =
                 ( model, Cmd.none )
             else
                 let
-                    latency =
-                        timing.receivedAt - timing.sentAt
-
+                    -- latency =
+                    --     timing.receivedAt - timing.sentAt
                     wait =
-                        Basics.max 0 (timing.delay - latency)
+                      Basics.max 0 timing.delay
                 in
                 ( { model | timing = { timing | waitUntil = time + wait, sentAt = time } }, send wsAddr "{\"next\" : 1}" )
 
