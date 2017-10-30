@@ -48,7 +48,7 @@ type alias Grid =
 
 
 type alias Timing =
-    { waitUntil : Time, sentAt : Time, receivedAt : Time, delay : Time }
+    { waitUntil : Time, sentAt : Time, delay : Time }
 
 
 type alias Model =
@@ -67,7 +67,7 @@ initModel { dynamicWsPort, delay } location =
                 "8080"
         }
     , cells = empty
-    , timing = { waitUntil = 0, sentAt = 0, receivedAt = 0, delay = delay }
+    , timing = { waitUntil = 0, sentAt = 0, delay = delay }
     }
 
 
@@ -172,16 +172,16 @@ update msg model =
             if time < timing.waitUntil then
                 ( model, Cmd.none )
             else
-                let
-                    -- latency =
-                    --     timing.receivedAt - timing.sentAt
-                    wait =
-                      Basics.max 0 timing.delay
-                in
-                ( { model | timing = { timing | waitUntil = time + wait, sentAt = time } }, send wsAddr "{\"next\" : 1}" )
+                ( { model | timing = { timing | sentAt = time, waitUntil = time + 1000 } }, send wsAddr "{\"next\" : 1}" )
 
         CurrentTime time ->
-            ( { model | timing = { timing | receivedAt = time } }, Cmd.none )
+            let
+                    latency =
+                         time - timing.sentAt
+                    wait =
+                      Basics.max 0 (timing.delay - latency)
+                in
+            ( { model | timing = { timing |  waitUntil = time + wait } }, Cmd.none )
 
         NewLocation _ ->
             ( model, Cmd.none )
