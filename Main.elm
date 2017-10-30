@@ -176,12 +176,13 @@ update msg model =
 
         CurrentTime time ->
             let
-                    latency =
-                         time - timing.sentAt
-                    wait =
-                      Basics.max 0 (timing.delay - latency)
-                in
-            ( { model | timing = { timing |  waitUntil = time + wait } }, Cmd.none )
+                latency =
+                    time - timing.sentAt
+
+                wait =
+                    Basics.max 0 (timing.delay - latency)
+            in
+            ( { model | timing = { timing | waitUntil = time + wait } }, Cmd.none )
 
         NewLocation _ ->
             ( model, Cmd.none )
