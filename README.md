@@ -17,3 +17,13 @@
 ```javascript
 { "alive" : [[2,3], [1,3]] }
 ```
+
+## Build
+
+```
+elm-make Main.elm --output=elm.js
+```
+
+```
+elm-live Main.elm --output=elm.js
+```
