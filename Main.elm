@@ -3,6 +3,7 @@ module Main exposing (..)
 --import Debug exposing (log)
 
 import AnimationFrame
+import Array exposing (Array)
 import Dict exposing (..)
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, decodeString, field, int, list)
@@ -52,7 +53,7 @@ type alias Timing =
 
 
 type alias Model =
-    { grid : Grid, url : Url, cells : CellsDict, timing : Timing }
+    { grid : Grid, url : Url, cells : CellsDict, timing : Timing, color : String }
 
 
 initModel : Flags -> Location -> Model
@@ -68,12 +69,13 @@ initModel { dynamicWsPort, delay } location =
         }
     , cells = empty
     , timing = { waitUntil = 0, sentAt = 0, delay = delay }
+    , color = "#007799"
     }
 
 
 init : Flags -> Location -> ( Model, Cmd Msg )
 init flags location =
-    ( initModel flags location, Task.perform SetScreenSize Window.size )
+    ( initModel flags location, Task.perform SetColor Time.now )
 
 
 type alias AliveCells =
@@ -99,6 +101,11 @@ toCellsDict =
         >> fromList
 
 
+colors : Array String
+colors =
+    Array.fromList [ "#483D8B", "#007799", "#4682B4", "#708090", "#808080" ]
+
+
 
 -- UPDATE
 
@@ -109,6 +116,7 @@ type Msg
     | NewLocation Location
     | NewFrame Time
     | CurrentTime Time
+    | SetColor Time
 
 
 wsAddress : Url -> String
@@ -150,6 +158,21 @@ update msg model =
                     "{ \"start\" : { \"width\" : " ++ cw ++ ", \"height\" : " ++ hw ++ " }}"
             in
             ( { model | grid = newGrid }, send wsAddr msg )
+
+        SetColor time ->
+            let
+                rndIdx =
+                    round (Time.inMilliseconds time) % Array.length colors
+
+                col =
+                    case Array.get rndIdx colors of
+                        Just s ->
+                            s
+
+                        Nothing ->
+                            "#007799"
+            in
+            ( { model | color = col }, Task.perform SetScreenSize Window.size )
 
         NewMessage cellsJson ->
             let
@@ -240,13 +263,13 @@ renderGrid width height cellSize =
     xls ++ yls
 
 
-renderCells : Int -> CellsDict -> List (Svg msg)
-renderCells size =
-    toList >> List.map (\( ( x, y ), _ ) -> rect [ Svg.Attributes.x (toString (x * size + 1)), Svg.Attributes.y (toString (y * size + 1)), Svg.Attributes.width (toString (size - 1)), Svg.Attributes.height (toString (size - 1)), style "fill:#007799" ] [])
+renderCells : Int -> String -> CellsDict -> List (Svg msg)
+renderCells size color =
+    toList >> List.map (\( ( x, y ), _ ) -> rect [ Svg.Attributes.x (toString (x * size + 1)), Svg.Attributes.y (toString (y * size + 1)), Svg.Attributes.width (toString (size - 1)), Svg.Attributes.height (toString (size - 1)), style ("fill:" ++ color) ] [])
 
 
 view : Model -> Html Msg
-view { grid, cells } =
+view { grid, cells, color } =
     let
         { width, height, cellSize } =
             grid
@@ -258,7 +281,7 @@ view { grid, cells } =
             renderGrid width height cellSize
 
         c =
-            renderCells cellSize cells
+            renderCells cellSize color cells
     in
     svg
         [ Svg.Attributes.width (toString width), Svg.Attributes.height (toString height) ]
