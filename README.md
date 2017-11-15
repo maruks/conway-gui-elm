@@ -13,9 +13,9 @@
 { "next" : 1 }
 ```
 
-### server should return data in this format
+### server should return data in the following format
 ```javascript
-{ "alive" : [[2,3], [1,3]] }
+{ "alive" : [[2,3], [0,3]] }
 ```
 
 ## Build
