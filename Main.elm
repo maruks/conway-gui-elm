@@ -6,7 +6,7 @@ import AnimationFrame
 import Array exposing (Array)
 import Dict exposing (..)
 import Html exposing (Html)
-import Json.Decode exposing (Decoder, decodeString, field, int, list)
+import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list)
 import List exposing (..)
 import Navigation exposing (Location, programWithFlags)
 import Svg exposing (Svg, line, rect, svg)
@@ -82,9 +82,28 @@ type alias AliveCells =
     List (List Int)
 
 
-cellsDecoder : Decoder AliveCells
-cellsDecoder =
-    field "alive" (list (list int))
+type Message
+    = Alive AliveCells
+    | ErrorCode Int
+
+
+messageDecoder : Decoder Message
+messageDecoder =
+    field "type" Json.Decode.string
+        |> andThen payloadDecoder
+
+
+payloadDecoder : String -> Decoder Message
+payloadDecoder msgType =
+    case msgType of
+        "alive" ->
+            field "cells" (list (list int)) |> Json.Decode.map Alive
+
+        "error" ->
+            field "code" int |> Json.Decode.map ErrorCode
+
+        _ ->
+            fail "unknown type"
 
 
 toCellsDict : AliveCells -> CellsDict
@@ -103,7 +122,7 @@ toCellsDict =
 
 colors : Array String
 colors =
-    Array.fromList [ "#483D8B", "#007799", "#4682B4", "#708090", "#808080" ]
+    Array.fromList [ "#007799", "#4682B4", "#708090" ]
 
 
 
@@ -174,22 +193,23 @@ update msg model =
             in
             ( { model | color = col }, Task.perform SetScreenSize Window.size )
 
-        NewMessage cellsJson ->
+        NewMessage message ->
             let
                 result =
-                    cellsJson
-                        |> decodeString cellsDecoder
-                        |> Result.map toCellsDict
+                    decodeString messageDecoder message
 
-                newCells =
+                ( newCells, command ) =
                     case result of
-                        Ok c ->
-                            c
+                        Ok (Alive cells) ->
+                            ( toCellsDict cells, Task.perform CurrentTime Time.now )
+
+                        Ok (ErrorCode _) ->
+                            ( cells, Task.perform SetScreenSize Window.size )
 
                         Err _ ->
-                            empty
+                            ( empty, Cmd.none )
             in
-            ( { model | cells = newCells }, Task.perform CurrentTime Time.now )
+            ( { model | cells = newCells }, command )
 
         NewFrame time ->
             if time < timing.waitUntil then
