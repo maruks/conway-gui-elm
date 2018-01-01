@@ -211,10 +211,10 @@ update msg model =
                     { width = w, height = h, cellSize = c }
 
                 cw =
-                    toString (w // c)
+                    toString <| w // c
 
                 hw =
-                    toString (h // c)
+                    toString <| h // c
 
                 msg =
                     "{ \"start\" : { \"width\" : " ++ cw ++ ", \"height\" : " ++ hw ++ " }}"
@@ -310,13 +310,13 @@ renderGrid width height cellSize =
             toString height
 
         lineStyle =
-            "stroke:#999999;stroke-width:1"
+            "stroke:#999999; stroke-opacity:0.5; stroke-width: 1"
 
         xls =
-            List.map (\x -> line [ x1 (toString x), y1 "0", x2 (toString x), y2 hs, style lineStyle ] []) xs
+            List.map (\x -> line [ x1 <| toString x, y1 "0", x2 <| toString x, y2 hs, style lineStyle ] []) xs
 
         yls =
-            List.map (\y -> line [ x1 "0", y1 (toString y), x2 ws, y2 (toString y), style lineStyle ] []) ys
+            List.map (\y -> line [ x1 "0", y1 <| toString y, x2 ws, y2 <| toString y, style lineStyle ] []) ys
     in
     xls ++ yls
 
@@ -333,7 +333,7 @@ getOr dict key default =
 
 renderCells : Int -> ColorsDict -> CellsDict -> List (Svg msg)
 renderCells size colors =
-    toList >> List.map (\( ( x, y ), colorCode ) -> rect [ Svg.Attributes.x (toString (x * size + 1)), Svg.Attributes.y (toString (y * size + 1)), Svg.Attributes.width (toString (size - 1)), Svg.Attributes.height (toString (size - 1)), "fill:" ++ getOr colors colorCode "#0099cc" |> style ] [])
+    toList >> List.map (\( ( x, y ), colorCode ) -> rect [ Svg.Attributes.x <| toString <| x * size + 1, Svg.Attributes.y <| toString <| y * size + 1, Svg.Attributes.width <| toString size, Svg.Attributes.height <| toString size, "fill:" ++ getOr colors colorCode "#0099cc" |> style ] [])
 
 
 view : Model -> Html Msg
@@ -343,7 +343,7 @@ view { grid, cells, colors } =
             grid
 
         b =
-            rect [ x "0", y "0", Svg.Attributes.width (toString width), Svg.Attributes.height (toString height), "fill:" ++ getOr colors 0 "#e6e6e6" |> style ] []
+            rect [ x "0", y "0", Svg.Attributes.width <| toString width, Svg.Attributes.height <| toString height, "fill:" ++ getOr colors 0 "#e6e6e6" |> style ] []
 
         g =
             renderGrid width height cellSize
@@ -352,5 +352,5 @@ view { grid, cells, colors } =
             renderCells cellSize colors cells
     in
     svg
-        [ Svg.Attributes.width (toString width), Svg.Attributes.height (toString height) ]
+        [ Svg.Attributes.width <| toString width, Svg.Attributes.height <| toString height ]
         (b :: (c ++ g))
