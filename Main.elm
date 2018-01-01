@@ -1,12 +1,10 @@
 module Main exposing (..)
 
---import Debug exposing (log)
-
 import AnimationFrame
-import Array exposing (Array)
+--import Debug exposing (log)
 import Dict exposing (..)
 import Html exposing (Html)
-import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list)
+import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list, null)
 import List exposing (..)
 import Navigation exposing (Location, programWithFlags)
 import Svg exposing (Svg, line, rect, svg)
@@ -36,8 +34,16 @@ main =
 -- MODEL
 
 
+type alias Point =
+    ( Int, Int )
+
+
+type alias Color =
+    Int
+
+
 type alias CellsDict =
-    Dict ( Int, Int ) Bool
+    Dict Point Color
 
 
 type alias Url =
@@ -52,8 +58,12 @@ type alias Timing =
     { waitUntil : Time, sentAt : Time, delay : Time }
 
 
+type alias ColorsDict =
+    Dict Int String
+
+
 type alias Model =
-    { grid : Grid, url : Url, cells : CellsDict, timing : Timing, color : String }
+    { grid : Grid, url : Url, cells : CellsDict, timing : Timing, colors : ColorsDict }
 
 
 initModel : Flags -> Location -> Model
@@ -69,21 +79,34 @@ initModel { dynamicWsPort, delay } location =
         }
     , cells = empty
     , timing = { waitUntil = 0, sentAt = 0, delay = delay }
-    , color = "#007799"
+    , colors = Dict.singleton 0 "#e6e6e6"
     }
 
 
 init : Flags -> Location -> ( Model, Cmd Msg )
 init flags location =
-    ( initModel flags location, Task.perform SetColor Time.now )
+    ( initModel flags location, Task.perform SetScreenSize Window.size )
 
 
-type alias AliveCells =
-    List (List Int)
+type alias Cell =
+    { color : Int, point : List Int }
+
+
+type alias CellsList =
+    List Cell
+
+
+type alias ColorMsg =
+    { color : String, code : Int }
+
+
+type alias ColorList =
+    List ColorMsg
 
 
 type Message
-    = Alive AliveCells
+    = CellsMessage CellsList
+    | ColorsMessage ColorList
     | ErrorCode Int
 
 
@@ -93,11 +116,28 @@ messageDecoder =
         |> andThen payloadDecoder
 
 
+cellDecoder : Decoder Cell
+cellDecoder =
+    Json.Decode.map2 Cell
+        (field "color" int)
+        (field "point" (list int))
+
+
+colorDecoder : Decoder ColorMsg
+colorDecoder =
+    Json.Decode.map2 ColorMsg
+        (field "color" Json.Decode.string)
+        (field "code" int)
+
+
 payloadDecoder : String -> Decoder Message
 payloadDecoder msgType =
     case msgType of
-        "alive" ->
-            field "cells" (list (list int)) |> Json.Decode.map Alive
+        "cells" ->
+            field "cells" (Json.Decode.oneOf [ null [], list cellDecoder ]) |> Json.Decode.map CellsMessage
+
+        "colors" ->
+            field "colors" (list colorDecoder) |> Json.Decode.map ColorsMessage
 
         "error" ->
             field "code" int |> Json.Decode.map ErrorCode
@@ -106,23 +146,27 @@ payloadDecoder msgType =
             fail "unknown type"
 
 
-toCellsDict : AliveCells -> CellsDict
+toCellsDict : CellsList -> CellsDict
 toCellsDict =
     List.map
-        (\x ->
-            case x of
+        (\c ->
+            case c.point of
                 [ x, y ] ->
-                    ( ( x, y ), True )
+                    ( ( x, y ), c.color )
 
                 _ ->
-                    ( ( 0, 0 ), False )
+                    ( ( 0, 0 ), c.color )
         )
         >> fromList
 
 
-colors : Array String
-colors =
-    Array.fromList [ "#007799", "#4682B4", "#708090" ]
+toColorsDict : ColorList -> ColorsDict
+toColorsDict =
+    List.map
+        (\c ->
+            ( c.code, c.color )
+        )
+        >> fromList
 
 
 
@@ -135,7 +179,6 @@ type Msg
     | NewLocation Location
     | NewFrame Time
     | CurrentTime Time
-    | SetColor Time
 
 
 wsAddress : Url -> String
@@ -178,38 +221,33 @@ update msg model =
             in
             ( { model | grid = newGrid }, send wsAddr msg )
 
-        SetColor time ->
-            let
-                rndIdx =
-                    round (Time.inMilliseconds time) % Array.length colors
-
-                col =
-                    case Array.get rndIdx colors of
-                        Just s ->
-                            s
-
-                        Nothing ->
-                            "#007799"
-            in
-            ( { model | color = col }, Task.perform SetScreenSize Window.size )
-
         NewMessage message ->
             let
                 result =
                     decodeString messageDecoder message
-
-                ( newCells, command ) =
-                    case result of
-                        Ok (Alive cells) ->
-                            ( toCellsDict cells, Task.perform CurrentTime Time.now )
-
-                        Ok (ErrorCode _) ->
-                            ( cells, Task.perform SetScreenSize Window.size )
-
-                        Err _ ->
-                            ( empty, Cmd.none )
             in
-            ( { model | cells = newCells }, command )
+            case result of
+                Ok (CellsMessage cells) ->
+                    let
+                        newCells =
+                            toCellsDict cells
+
+                        task =
+                            if Dict.isEmpty newCells then
+                                Task.perform SetScreenSize Window.size
+                            else
+                                Task.perform CurrentTime Time.now
+                    in
+                    ( { model | cells = newCells }, task )
+
+                Ok (ColorsMessage colors) ->
+                    ( { model | colors = toColorsDict colors }, Cmd.none )
+
+                Ok (ErrorCode _) ->
+                    ( model, Task.perform SetScreenSize Window.size )
+
+                Err _ ->
+                    ( { model | cells = empty }, Cmd.none )
 
         NewFrame time ->
             if time < timing.waitUntil then
@@ -283,25 +321,35 @@ renderGrid width height cellSize =
     xls ++ yls
 
 
-renderCells : Int -> String -> CellsDict -> List (Svg msg)
-renderCells size color =
-    toList >> List.map (\( ( x, y ), _ ) -> rect [ Svg.Attributes.x (toString (x * size + 1)), Svg.Attributes.y (toString (y * size + 1)), Svg.Attributes.width (toString (size - 1)), Svg.Attributes.height (toString (size - 1)), style ("fill:" ++ color) ] [])
+getOr : Dict comparable v -> comparable -> v -> v
+getOr dict key default =
+    case get key dict of
+        Nothing ->
+            default
+
+        Just p ->
+            p
+
+
+renderCells : Int -> ColorsDict -> CellsDict -> List (Svg msg)
+renderCells size colors =
+    toList >> List.map (\( ( x, y ), colorCode ) -> rect [ Svg.Attributes.x (toString (x * size + 1)), Svg.Attributes.y (toString (y * size + 1)), Svg.Attributes.width (toString (size - 1)), Svg.Attributes.height (toString (size - 1)), "fill:" ++ getOr colors colorCode "#0099cc" |> style ] [])
 
 
 view : Model -> Html Msg
-view { grid, cells, color } =
+view { grid, cells, colors } =
     let
         { width, height, cellSize } =
             grid
 
         b =
-            rect [ x "0", y "0", Svg.Attributes.width (toString width), Svg.Attributes.height (toString height), style "fill:#e6e6e6" ] []
+            rect [ x "0", y "0", Svg.Attributes.width (toString width), Svg.Attributes.height (toString height), "fill:" ++ getOr colors 0 "#e6e6e6" |> style ] []
 
         g =
             renderGrid width height cellSize
 
         c =
-            renderCells cellSize color cells
+            renderCells cellSize colors cells
     in
     svg
         [ Svg.Attributes.width (toString width), Svg.Attributes.height (toString height) ]
