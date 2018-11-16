@@ -112,7 +112,7 @@ type Message
 
 messageDecoder : Decoder Message
 messageDecoder =
-    field "type" Json.Decode.string
+    field "tag" Json.Decode.string
         |> andThen payloadDecoder
 
 
