@@ -1,9 +1,18 @@
 <!doctype html>
-<body>
-  <div></div>
-  <script src="elm.js"></script>
-  <script>Elm.Main.embed(document.querySelector("div"),
-    { dynamicWsPort : false,
-      delay : 300 });
-  </script>
-</body>
+<html>
+
+  <head>
+    <!--link rel="stylesheet" href="style.css" /-->
+    <title>Game of Life</title>
+  </head>
+
+  <body>
+    <div></div>
+    <script src="elm.js"></script>
+    <script>Elm.Main.embed(document.querySelector("div"),
+	       { dynamicWsPort : false,
+		 delay : 300 });
+    </script>
+  </body>
+
+</html>
