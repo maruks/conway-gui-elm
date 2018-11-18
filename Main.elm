@@ -1,7 +1,8 @@
 module Main exposing (..)
 
-import AnimationFrame
 --import Debug exposing (log)
+
+import AnimationFrame
 import Dict exposing (..)
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list, null)
@@ -47,7 +48,7 @@ type alias CellsDict =
 
 
 type alias Url =
-    { host : String, portNum : String }
+    { host : String, portNum : String, pathName : String }
 
 
 type alias Grid =
@@ -71,6 +72,7 @@ initModel { dynamicWsPort, delay } location =
     { grid = { width = 0, height = 0, cellSize = 1 }
     , url =
         { host = location.hostname
+        , pathName = location.pathname
         , portNum =
             if dynamicWsPort then
                 location.port_
@@ -182,9 +184,20 @@ type Msg
 
 
 wsAddress : Url -> String
-wsAddress { host, portNum } =
-    "ws://" ++ host ++ ":" ++ portNum ++ "/websocket"
+wsAddress { host, portNum, pathName } =
+    let
+        xs =
+            String.split "/" pathName
 
+        path =
+            (String.split "/" pathName |> List.take (List.length xs - 1)) ++ [ "websocket" ] |> String.join "/"
+    in
+    "ws://" ++ host ++ ":" ++ portNum
+        ++ (if String.startsWith "/" path then
+                path
+            else
+                "/" ++ path
+           )
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -199,7 +212,7 @@ update msg model =
         SetScreenSize { width, height } ->
             let
                 c =
-                    Basics.max 10 (width // 90)
+                     (Basics.max width height) // 80 |> Basics.max 10
 
                 w =
                     width - width % c - c
