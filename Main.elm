@@ -3,11 +3,11 @@ module Main exposing (..)
 --import Debug exposing (log)
 
 import AnimationFrame
+import Array exposing (Array)
 import Dict exposing (..)
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list, null)
 import List exposing (..)
-import Array exposing (Array)
 import Navigation exposing (Location, programWithFlags)
 import Svg exposing (Svg, line, rect, svg)
 import Svg.Attributes exposing (..)
@@ -47,6 +47,7 @@ type alias Color =
 type alias CellsDict =
     Dict Point Color
 
+
 type alias CellsDictBuffer =
     { buffer : Array CellsDict, size : Int, currentIndex : Int, showIndex : Int }
 
@@ -60,48 +61,63 @@ type alias GridSize =
 
 
 type alias Timing =
-    { waitUntil : Time, delay : Time }
+    { waitUntil : Time, delay : Time, nextReqSent : Bool }
 
 
 type alias ColorsDict =
     Dict Int String
 
+
 type alias Model =
     { grid : GridSize, url : Url, cells : CellsDictBuffer, timing : Timing, colors : ColorsDict }
 
+
 initBuffer : Int -> CellsDictBuffer
-initBuffer size = { buffer = Array.repeat size empty, size = size, currentIndex = 0, showIndex = 0 }
+initBuffer size =
+    { buffer = Array.repeat size empty, size = size, currentIndex = 0, showIndex = 0 }
+
 
 isBufferFull : CellsDictBuffer -> Bool
-isBufferFull {size, currentIndex, showIndex } = showIndex == rem (currentIndex + 1) size
+isBufferFull { size, currentIndex, showIndex } =
+    showIndex == rem (currentIndex + 1) size
+
 
 addCellsToBuffer : CellsDictBuffer -> CellsDict -> CellsDictBuffer
-addCellsToBuffer cellsBuffer cells = let { buffer, size , currentIndex , showIndex } =
-                                             cellsBuffer
+addCellsToBuffer cellsBuffer cells =
+    let
+        { buffer, size, currentIndex, showIndex } =
+            cellsBuffer
 
-                                         nextCurrentIdx =
-                                             rem (currentIndex + 1) size
-                                in
-                                    if (isBufferFull cellsBuffer) then
-                                        cellsBuffer
-                                    else
-                                        {cellsBuffer | buffer = Array.set nextCurrentIdx cells buffer, currentIndex = nextCurrentIdx }
+        nextCurrentIdx =
+            rem (currentIndex + 1) size
+    in
+    if isBufferFull cellsBuffer then
+        cellsBuffer
+    else
+        { cellsBuffer | buffer = Array.set nextCurrentIdx cells buffer, currentIndex = nextCurrentIdx }
+
 
 nextBufferFrame : CellsDictBuffer -> CellsDictBuffer
-nextBufferFrame ({ buffer, size , currentIndex , showIndex } as b) =
+nextBufferFrame ({ buffer, size, currentIndex, showIndex } as b) =
     let
-        nextBuffer = if (currentIndex == showIndex) then
-                         b
-                     else
-                         { b | showIndex = rem (showIndex + 1) size }
+        nextBuffer =
+            if currentIndex == showIndex then
+                b
+            else
+                { b | showIndex = rem (showIndex + 1) size }
     in
-        nextBuffer
+    nextBuffer
+
 
 visibleBufferFrame : CellsDictBuffer -> CellsDict
 visibleBufferFrame { buffer, showIndex } =
     case Array.get showIndex buffer of
-        Just cells -> cells
-        Nothing -> empty
+        Just cells ->
+            cells
+
+        Nothing ->
+            empty
+
 
 initModel : Flags -> Location -> Model
 initModel { dynamicWsPort, delay, bufferSize } location =
@@ -116,7 +132,7 @@ initModel { dynamicWsPort, delay, bufferSize } location =
                 "8080"
         }
     , cells = initBuffer bufferSize
-    , timing = { waitUntil = 0, delay = delay }
+    , timing = { waitUntil = 0, delay = delay, nextReqSent = False }
     , colors = Dict.singleton 0 "#e6e6e6"
     }
 
@@ -217,6 +233,7 @@ type Msg
     | NewLocation Location
     | NewFrame Time
 
+
 wsAddress : Url -> String
 wsAddress { host, portNum, pathName } =
     let
@@ -226,12 +243,16 @@ wsAddress { host, portNum, pathName } =
         path =
             (String.split "/" pathName |> List.take (List.length xs - 1)) ++ [ "websocket" ] |> String.join "/"
     in
-    "ws://" ++ host ++ ":" ++ portNum
+    "ws://"
+        ++ host
+        ++ ":"
+        ++ portNum
         ++ (if String.startsWith "/" path then
                 path
             else
                 "/" ++ path
            )
+
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -246,7 +267,7 @@ update msg model =
         SetScreenSize { width, height } ->
             let
                 c =
-                     (Basics.max width height) // 80 |> Basics.max 10
+                    Basics.max width height // 80 |> Basics.max 10
 
                 w =
                     width - width % c - c
@@ -279,16 +300,10 @@ update msg model =
                         newCells =
                             toCellsDict cellsMsg
 
-                        newBuffer = addCellsToBuffer cells newCells
-
-                        task =
-                            if Dict.isEmpty newCells then
-                                Task.perform SetScreenSize Window.size
-                            else
-                                Cmd.none
-
+                        newBuffer =
+                            addCellsToBuffer cells newCells
                     in
-                    ( { model | cells = newBuffer }, task )
+                    ( { model | cells = newBuffer, timing = { timing | nextReqSent = False } }, Cmd.none )
 
                 Ok (ColorsMessage colors) ->
                     ( { model | colors = toColorsDict colors }, Cmd.none )
@@ -296,17 +311,17 @@ update msg model =
                 Ok (ErrorCode _) ->
                     ( model, Task.perform SetScreenSize Window.size )
 
-                Err _ ->
+                Err e ->
                     ( { model | cells = initBuffer cells.size }, Cmd.none )
 
         NewFrame time ->
             if time < timing.waitUntil then
-                ( model, if isBufferFull cells then
-                                Cmd.none
-                            else
-                                send wsAddr "{\"next\" : 1}" )
+                if isBufferFull cells || timing.nextReqSent then
+                    ( model, Cmd.none )
+                else
+                    ( { model | timing = { timing | nextReqSent = True } }, send wsAddr "{\"next\" : 1}" )
             else
-                ( { model | timing = { timing | waitUntil = time + timing.delay } , cells = nextBufferFrame cells }, Cmd.none )
+                ( { model | timing = { timing | waitUntil = time + timing.delay }, cells = nextBufferFrame cells }, Cmd.none )
 
         NewLocation _ ->
             ( model, Cmd.none )
