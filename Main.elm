@@ -7,6 +7,7 @@ import Dict exposing (..)
 import Html exposing (Html)
 import Json.Decode exposing (Decoder, andThen, decodeString, fail, field, int, list, null)
 import List exposing (..)
+import Array exposing (Array)
 import Navigation exposing (Location, programWithFlags)
 import Svg exposing (Svg, line, rect, svg)
 import Svg.Attributes exposing (..)
@@ -17,7 +18,7 @@ import Window
 
 
 type alias Flags =
-    { dynamicWsPort : Bool, delay : Time }
+    { dynamicWsPort : Bool, delay : Time, bufferSize : Int }
 
 
 main : Program Flags Model Msg
@@ -46,29 +47,64 @@ type alias Color =
 type alias CellsDict =
     Dict Point Color
 
+type alias CellsDictBuffer =
+    { buffer : Array CellsDict, size : Int, currentIndex : Int, showIndex : Int }
+
 
 type alias Url =
     { host : String, portNum : String, pathName : String }
 
 
-type alias Grid =
+type alias GridSize =
     { width : Int, height : Int, cellSize : Int }
 
 
 type alias Timing =
-    { waitUntil : Time, sentAt : Time, delay : Time }
+    { waitUntil : Time, delay : Time }
 
 
 type alias ColorsDict =
     Dict Int String
 
-
 type alias Model =
-    { grid : Grid, url : Url, cells : CellsDict, timing : Timing, colors : ColorsDict }
+    { grid : GridSize, url : Url, cells : CellsDictBuffer, timing : Timing, colors : ColorsDict }
 
+initBuffer : Int -> CellsDictBuffer
+initBuffer size = { buffer = Array.repeat size empty, size = size, currentIndex = 0, showIndex = 0 }
+
+isBufferFull : CellsDictBuffer -> Bool
+isBufferFull {size, currentIndex, showIndex } = showIndex == rem (currentIndex + 1) size
+
+addCellsToBuffer : CellsDictBuffer -> CellsDict -> CellsDictBuffer
+addCellsToBuffer cellsBuffer cells = let { buffer, size , currentIndex , showIndex } =
+                                             cellsBuffer
+
+                                         nextCurrentIdx =
+                                             rem (currentIndex + 1) size
+                                in
+                                    if (isBufferFull cellsBuffer) then
+                                        cellsBuffer
+                                    else
+                                        {cellsBuffer | buffer = Array.set nextCurrentIdx cells buffer, currentIndex = nextCurrentIdx }
+
+nextBufferFrame : CellsDictBuffer -> CellsDictBuffer
+nextBufferFrame ({ buffer, size , currentIndex , showIndex } as b) =
+    let
+        nextBuffer = if (currentIndex == showIndex) then
+                         b
+                     else
+                         { b | showIndex = rem (showIndex + 1) size }
+    in
+        nextBuffer
+
+visibleBufferFrame : CellsDictBuffer -> CellsDict
+visibleBufferFrame { buffer, showIndex } =
+    case Array.get showIndex buffer of
+        Just cells -> cells
+        Nothing -> empty
 
 initModel : Flags -> Location -> Model
-initModel { dynamicWsPort, delay } location =
+initModel { dynamicWsPort, delay, bufferSize } location =
     { grid = { width = 0, height = 0, cellSize = 1 }
     , url =
         { host = location.hostname
@@ -79,8 +115,8 @@ initModel { dynamicWsPort, delay } location =
             else
                 "8080"
         }
-    , cells = empty
-    , timing = { waitUntil = 0, sentAt = 0, delay = delay }
+    , cells = initBuffer bufferSize
+    , timing = { waitUntil = 0, delay = delay }
     , colors = Dict.singleton 0 "#e6e6e6"
     }
 
@@ -180,8 +216,6 @@ type Msg
     | NewMessage String
     | NewLocation Location
     | NewFrame Time
-    | CurrentTime Time
-
 
 wsAddress : Url -> String
 wsAddress { host, portNum, pathName } =
@@ -232,7 +266,7 @@ update msg model =
                 msg =
                     "{ \"start\" : { \"width\" : " ++ cw ++ ", \"height\" : " ++ hw ++ " }}"
             in
-            ( { model | grid = newGrid }, send wsAddr msg )
+            ( { model | grid = newGrid, cells = initBuffer cells.size }, send wsAddr msg )
 
         NewMessage message ->
             let
@@ -240,18 +274,21 @@ update msg model =
                     decodeString messageDecoder message
             in
             case result of
-                Ok (CellsMessage cells) ->
+                Ok (CellsMessage cellsMsg) ->
                     let
                         newCells =
-                            toCellsDict cells
+                            toCellsDict cellsMsg
+
+                        newBuffer = addCellsToBuffer cells newCells
 
                         task =
                             if Dict.isEmpty newCells then
                                 Task.perform SetScreenSize Window.size
                             else
-                                Task.perform CurrentTime Time.now
+                                Cmd.none
+
                     in
-                    ( { model | cells = newCells }, task )
+                    ( { model | cells = newBuffer }, task )
 
                 Ok (ColorsMessage colors) ->
                     ( { model | colors = toColorsDict colors }, Cmd.none )
@@ -260,23 +297,16 @@ update msg model =
                     ( model, Task.perform SetScreenSize Window.size )
 
                 Err _ ->
-                    ( { model | cells = empty }, Cmd.none )
+                    ( { model | cells = initBuffer cells.size }, Cmd.none )
 
         NewFrame time ->
             if time < timing.waitUntil then
-                ( model, Cmd.none )
+                ( model, if isBufferFull cells then
+                                Cmd.none
+                            else
+                                send wsAddr "{\"next\" : 1}" )
             else
-                ( { model | timing = { timing | sentAt = time, waitUntil = time + 1000 } }, send wsAddr "{\"next\" : 1}" )
-
-        CurrentTime time ->
-            let
-                latency =
-                    time - timing.sentAt
-
-                wait =
-                    Basics.max 0 (timing.delay - latency)
-            in
-            ( { model | timing = { timing | waitUntil = time + wait } }, Cmd.none )
+                ( { model | timing = { timing | waitUntil = time + timing.delay } , cells = nextBufferFrame cells }, Cmd.none )
 
         NewLocation _ ->
             ( model, Cmd.none )
@@ -362,7 +392,7 @@ view { grid, cells, colors } =
             renderGrid width height cellSize
 
         c =
-            renderCells cellSize colors cells
+            renderCells cellSize colors (visibleBufferFrame cells)
     in
     svg
         [ Svg.Attributes.width <| toString width, Svg.Attributes.height <| toString height ]
